@@ -11,8 +11,10 @@ except:
     print('no path given in script call, exiting...')
     sys.exit(1)
 
-for filename in os.listdir(pathName):
-prefix, num = filename[:-3].split('_')
-num = num.zfill(3)
-new_filename = prefix + "_" + num + ".png"
-os.rename(os.path.join(path, filename), os.path.join(path, new_filename))
+filelist = [file for file in os.listdir(pathName) if file.endswith('.png')] #generate the file list of png images
+
+for filename in filelist:
+    prefix, num = filename[:-4].split('_')
+    num = num.zfill(4)
+    new_filename = prefix + "_" + num + ".png"
+    os.rename(os.path.join(pathName, filename), os.path.join(pathName, new_filename))
