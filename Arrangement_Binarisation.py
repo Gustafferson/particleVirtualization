@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd 
 from tqdm import tqdm
 import pickle
+from skimage.measure import label, regionprops
 
 # Initial directory handling, path to folder should be nominated in the script call
 try:
@@ -23,8 +24,15 @@ except:
 
 
 BinData={}
+index=0
 
-#TODO Add detection of number of files and hence angle of image
+numStops = len(imageFiles)
+angleIncrement = 360/numStops
+angle =range(0, 360, int(angleIncrement)) #list of angle coordinates
+
+BinData[angles] = angle
+
+mask = np.zeros([1500,2500])
 
 # START LOOP FOR EACH FILE IN FOLDER
 for file in tqdm(os.listdir(pathName)):
@@ -55,14 +63,32 @@ for file in tqdm(os.listdir(pathName)):
         outer_bound_bottom = min(right_occurance_of_255.loc[right_occurance_of_255['columns'].idxmax(axis=0),'rows'],left_occurance_of_255.loc[left_occurance_of_255['columns'].idxmax(axis=0),'rows'])
 
         thresh_img = thresh_img[outer_bound_bottom:outer_bound_top:,outer_bound_left:outer_bound_right:] #cropped thresh_img using bounds
+        thresh_img = np.invert(thresh_img)
 
-        BinData[filename] = [thresh_img.shape,thresh_img]
+        #Find the centriod coordinates of the binary particle area
+        props = regionprops(thresh_img)
+        y,x = props[0]['centroid']
 
+        #Use y,x coordinates to offset thresh_img inside a 3000x3000 frame centre_y = 1500-(y-thresh_img.shape[0]/2)
+        frame_diff_y = round((mask.shape[0]-thresh_img.shape[0])/2) # difference in y of top left corner of mask and thresh_img
+        frame_diff_x = round((mask.shape[1]-thresh_img.shape[1])/2) # difference in x of top left corner of mask and thresh_img
+        
+        off_y = round(-y+thresh_img.shape[0]/2) # y offset of centroid from centre of thresh_img
+        off_x = round(-x+thresh_img.shape[1]/2) # x offset of centroid from centre of thresh_img
+
+        frame_diff_y+=off_y # actual difference in top left corner coordinate
+        frame_diff_x+=off_x
+
+        standardised = mask.copy()
+        standardised[frame_diff_y:frame_diff_y+thresh_img.shape[0], frame_diff_x:frame_diff_x+thresh_img.shape[1]] = thresh_img
+
+        BinData[int(angle[index])] = [standardised] #Adding dict entry where key is cumulative angle of rotation
+        index += 1
         # print(os.path.join(directory, filename))
         continue
      else:
         continue
 
-print('Images processed, pickling outcome...')
+print('Images processed, pickling standardised images...')
 pickle.dump(BinData,open(os.path.join(pathName, 'data.pkl'),'wb'))
 print('Done!')
