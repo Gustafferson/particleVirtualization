@@ -8,7 +8,11 @@ import numpy as np
 import pandas as pd 
 from tqdm import tqdm
 import pickle
-from skimage.measure import label, regionprops
+from skimage.measure import label, regionprops, marching_cubes_lewiner
+from scipy.ndimage import  rotate
+from stl import mesh
+
+
 
 # Initial directory handling, path to folder should be nominated in the script call
 try:
@@ -30,22 +34,28 @@ numStops = len(imageFiles)
 angleIncrement = 360/numStops
 angle =range(0, 360, int(angleIncrement)) #list of angle coordinates
 
-BinData[angles] = angle
+BinData['angles'] = angle
 
-mask = np.zeros([1500,2500])
+downsampleFactor = 1 # adding downsampling factor to increase performance
+
+mask = np.zeros([1500,3000],dtype='uint8')
+intersection = np.ones([round(1500/downsampleFactor),round(3000/downsampleFactor),round(3000/downsampleFactor)],dtype='uint8')
+
 
 # START LOOP FOR EACH FILE IN FOLDER
 for file in tqdm(os.listdir(pathName)):
      filename = os.fsdecode(file)
      if filename.endswith(".png"):
-        img = cv2.imread(os.path.join(pathName,file)) #read the image
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) #convert x,y,3 array to x,y,1
+
+        standardised = mask.copy()
+
+        img = cv2.imread(os.path.join(pathName,file),0).astype('uint8')#read the image, 0 for grayscale
         
-        thresh_val, thresh_img = cv2.threshold(gray,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU) #otsu thresholding on the grayscale
-        midpoint = int(thresh_img.shape[1] / 2)
+        thresh_val, img = cv2.threshold(img,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU) #otsu thresholding on the grayscale
+        midpoint = int(img.shape[1] / 2)
 
         #separate the image into left and right sides
-        left, right = np.fliplr(thresh_img[::,0:midpoint]), thresh_img[::,midpoint:-1] #left side has been flipped to allow for same op on each side
+        left, right = np.fliplr(img[::,0:midpoint]), img[::,midpoint:-1] #left side has been flipped to allow for same op on each side
         #scan down rows for 255 values, remove all but first 
         right_occurance_of_255  = pd.DataFrame(data=np.vstack(np.where(right==255)).T,columns=["rows","columns"]).drop_duplicates(subset="rows", keep='first')
         left_occurance_of_255   = pd.DataFrame(data=np.vstack(np.where(left==255)).T,columns=["rows","columns"]).drop_duplicates(subset="rows", keep='first')
@@ -62,8 +72,8 @@ for file in tqdm(os.listdir(pathName)):
         #find the base point of particle which occurs in the last value (idxmax) of 255
         outer_bound_bottom = min(right_occurance_of_255.loc[right_occurance_of_255['columns'].idxmax(axis=0),'rows'],left_occurance_of_255.loc[left_occurance_of_255['columns'].idxmax(axis=0),'rows'])
 
-        thresh_img = thresh_img[outer_bound_bottom:outer_bound_top:,outer_bound_left:outer_bound_right:] #cropped thresh_img using bounds
-        thresh_img = np.invert(thresh_img)
+        thresh_img = img[outer_bound_bottom:outer_bound_top:,outer_bound_left:outer_bound_right:] #cropped thresh_img using bounds
+        thresh_img = np.invert(thresh_img).astype('uint8')
 
         #Find the centriod coordinates of the binary particle area
         props = regionprops(thresh_img)
@@ -79,16 +89,37 @@ for file in tqdm(os.listdir(pathName)):
         frame_diff_y+=off_y # actual difference in top left corner coordinate
         frame_diff_x+=off_x
 
-        standardised = mask.copy()
-        standardised[frame_diff_y:frame_diff_y+thresh_img.shape[0], frame_diff_x:frame_diff_x+thresh_img.shape[1]] = thresh_img
+        
+        standardised[frame_diff_y:frame_diff_y+thresh_img.shape[0], frame_diff_x:frame_diff_x+thresh_img.shape[1]] = thresh_img/255 # adding thresh_img to centre of mask.copy(), dividing values to give 0 and 1
+        standardised = standardised.astype('uint8') # ensuring array is a uint8 to save space
 
-        BinData[int(angle[index])] = [standardised] #Adding dict entry where key is cumulative angle of rotation
+        
+        standardised = standardised[0::downsampleFactor,0::downsampleFactor]
+       
+        standardised = np.repeat(standardised[:, :, np.newaxis], max(standardised.shape[0],standardised.shape[1]), axis=2).astype('uint8') # extruding the array through the max array shape to create a polyhedron
+        standardised = rotate(standardised, angle[index], axes=(1,2),output='uint8', reshape=False, order=0, mode='constant', cval=0.0, prefilter=False) # rotating the array by 'slice' (y-axis)
+
+        #Add matrix multiplication to give final array
+        intersection = intersection*standardised # multiplies the constant np.ones array by the current rotated polyhedron 1*1 -> 1; 1*0 -> 0 etc.
+
+
+        # BinData[int(angle[index])] = polyhedron # Adding dict entry where key is cumulative angle of rotation
         index += 1
         # print(os.path.join(directory, filename))
         continue
      else:
         continue
 
-print('Images processed, pickling standardised images...')
-pickle.dump(BinData,open(os.path.join(pathName, 'data.pkl'),'wb'))
+print('Images processed, volume reconstructed, meshing with marching cubes...')
+verts, faces, normals, values = marching_cubes(intersection,spacing=(1.0, 1.0, 1.0),gradient_direction='descent',step_size=1)
+
+particleMesh = mesh.Mesh(np.zeros(faces.shape[0], dtype=mesh.Mesh.dtype))
+for i, f in enumerate(faces):
+    for j in range(3):
+        particleMesh.vectors[i][j] = verts[f[j],:]
+
+particleMesh.save(os.path.join(pathName, 'particleMesh.stl'))
+
+
+pickle.dump(intersection,open(os.path.join(pathName, 'data.pkl'),'wb'))
 print('Done!')
