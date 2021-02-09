@@ -7,6 +7,7 @@ from tqdm import tqdm
 from skimage.measure import label, regionprops, marching_cubes_lewiner
 from scipy.ndimage import  rotate
 from stl import mesh
+import math
 
 def binarise(image):
     thresh_val, thresh_img = cv2.threshold(cv2.imread(image,0).astype('uint8'),0,255,cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU) #otsu thresholding on the grayscale
@@ -40,6 +41,25 @@ def centre_in_frame(shape_list, img_list):
     
     mask = np.zeros(frame_dims,dtype='uint8')
 
+    centred_list = []
+
     for img in img_list:
         props = regionprops(img)
         y,x = props[0]['centroid']
+
+        #Use y,x coordinates to offset img inside a frame at its centre
+        frame_diff_y = math.ceil((mask.shape[0]-img.shape[0])/2) # difference in y of top left corner of mask and thresh_img
+        frame_diff_x = math.ceil((mask.shape[1]-img.shape[1])/2) # difference in x of top left corner of mask and thresh_img
+        
+        off_y = math.ceil(-y+img.shape[0]/2) # y offset of centroid from centre of thresh_img
+        off_x = math.ceil(-x+img.shape[1]/2) # x offset of centroid from centre of thresh_img
+
+        frame_diff_y+=off_y # actual difference in top left corner coordinate
+        frame_diff_x+=off_x
+
+        centred[frame_diff_y:frame_diff_y+img.shape[0], frame_diff_x:frame_diff_x+img.shape[1]] = img/255 # adding thresh_img to centre of mask.copy(), dividing values to give 0 and 1
+        centred = centred.astype('uint8') # ensuring array is a uint8 to save space
+
+        centred_list.append(centred)
+
+    return centred_list
