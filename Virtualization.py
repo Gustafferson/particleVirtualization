@@ -36,7 +36,7 @@ def crop_to_roi(image_arr):
 
     return cropped.astype('uint8'), cropped.shape
 
-def centre_in_frame(shape_list, img_list):
+def centre_by_centroid(shape_list, img_list):
     frame_dims = [max([dim[0] for dim in shape_list]),max([dim[1] for dim in shape_list])]
     
     mask = np.zeros(frame_dims,dtype='uint8')
@@ -63,3 +63,31 @@ def centre_in_frame(shape_list, img_list):
         centred_list.append(centred)
 
     return centred_list
+
+def find_centre_of_rotation(imageA, imageB):
+    """
+    This function finds the centre of rotation of a particle by comparing two opposite binary images and finding the same common point.
+    With this point, the average x coordinate can be established, this is the centre of rotation.
+
+    Each image can then be centred around the centre of rotation through a transformation in polar coordinate space.
+
+    Images are required to be cropped to ROI, best way is using image sequence in imageJ, this could be integrated into a python gui call.
+    
+    """
+    imageA = imageA.astype('uint8')
+    imageB = imageB.astype('uint8')
+
+    loc_maxA_x = max(np.argmax(imageA, axis=0))
+    loc_maxB_x = max(np.argmax(imageB, axis=0))
+
+    cor = np.mean([loc_maxA_x,loc_maxB_x])
+
+    return cor
+
+def adjust_to_cor(imgDirectory, centre_of_rotation, cor_ref_img)
+    """ 
+    This function uses the trailing organisation number in the filename (XXXXXXX_01.img) 
+    to align all images with the centre of rotation.
+    centre_of_rotation: a single int representing an x coordinate.
+    cor_ref_img: the image number associated with the centre_of_rotation, passed as a string
+    """
